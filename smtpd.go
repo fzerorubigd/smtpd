@@ -26,10 +26,10 @@ var (
 	mailSizeRE = regexp.MustCompile(`[Ss][Ii][Zz][Ee]=(\d+)`)
 )
 
-// handler function called upon successful receipt of an email.
+// Handler function called upon successful receipt of an email.
 type Handler func(remoteAddr net.Addr, from string, to []string, data []byte)
 
-// handlerRcpt function called on RCPT. Return accept status.
+// HandlerRcpt function called on RCPT. Return accept status.
 type HandlerRcpt func(remoteAddr net.Addr, from string, to string) bool
 
 // AuthHandler function called when a login attempt is performed. Returns true if credentials are correct.
@@ -66,7 +66,7 @@ type LogFunc func(remoteIP, verb, line string)
 // OptionSetter is used to handle the options in the server
 type OptionSetter func(*Server) error
 
-// SetAddress is for setting the address
+// WithAddress is for setting the address, the default is :25
 func WithAddress(addr string) OptionSetter {
 	return func(server *Server) error {
 		// TODO : validate the address
@@ -75,7 +75,7 @@ func WithAddress(addr string) OptionSetter {
 	}
 }
 
-// SetAppName is for setting the app name
+// WithAppName is for setting the app name, the default is smtpd
 func WithAppName(app string) OptionSetter {
 	return func(server *Server) error {
 		server.appname = app
@@ -83,13 +83,16 @@ func WithAppName(app string) OptionSetter {
 	}
 }
 
-func WithAuthHandler(handler AuthHandler) OptionSetter {
+// WithAuthHandler set the authentication handler and if the authentication is required
+func WithAuthHandler(handler AuthHandler, required bool) OptionSetter {
 	return func(server *Server) error {
+		server.authRequired = required
 		server.authHandler = handler
 		return nil
 	}
 }
 
+// AllowAuthMechanisms to overwrite the authentication mechanism
 func AllowAuthMechanisms(mehc string, allow bool) OptionSetter {
 	return func(server *Server) error {
 		server.authMechs[mehc] = allow
@@ -97,13 +100,7 @@ func AllowAuthMechanisms(mehc string, allow bool) OptionSetter {
 	}
 }
 
-func AuthRequired(req bool) OptionSetter {
-	return func(server *Server) error {
-		server.authRequired = req
-		return nil
-	}
-}
-
+// WithRcptHandler add a RCPT handler to the server
 func WithRcptHandler(handler HandlerRcpt) OptionSetter {
 	return func(server *Server) error {
 		server.handlerRcpt = handler
@@ -111,6 +108,7 @@ func WithRcptHandler(handler HandlerRcpt) OptionSetter {
 	}
 }
 
+// WithHostname set the host name, default value is the os hostname
 func WithHostname(host string) OptionSetter {
 	return func(server *Server) error {
 		server.hostname = host
@@ -118,6 +116,8 @@ func WithHostname(host string) OptionSetter {
 	}
 }
 
+// WithLogger is for setting the logger
+// TODO: better logging interface
 func WithLogger(l LogFunc) OptionSetter {
 	return func(server *Server) error {
 		server.logFn = l
@@ -133,6 +133,7 @@ func WithMaxSize(in int) OptionSetter {
 	}
 }
 
+// WithTimeout set the timeout on the connection
 func WithTimeout(t time.Duration) OptionSetter {
 	return func(server *Server) error {
 		server.timeout = t
@@ -140,12 +141,22 @@ func WithTimeout(t time.Duration) OptionSetter {
 	}
 }
 
+// WithTLS is for setting the TLS
 func WithTLS(certFile string, keyFile string) OptionSetter {
 	return func(server *Server) error {
 		return server.configureTLS(certFile, keyFile)
 	}
 }
 
+// WithTLSPassphrase is for setting the TLS with password
+func WithTLSPassphrase(certFile string, keyFile string, pass string) OptionSetter {
+	return func(server *Server) error {
+		return server.configureTLSWithPassphrase(certFile, keyFile, pass)
+	}
+}
+
+// RequireTLS Require TLS for every command except NOOP, EHLO, STARTTLS, or QUIT
+// as per RFC 3207. Ignored if TLS is not configured.
 func RequireTLS() OptionSetter {
 	return func(server *Server) error {
 		server.tlsRequired = true
@@ -153,16 +164,12 @@ func RequireTLS() OptionSetter {
 	}
 }
 
+// OnlyTLS Listen for incoming TLS connections only
+// (not recommended as it may reduce compatibility). Ignored if TLS is not configured.
 func OnlyTLS() OptionSetter {
 	return func(server *Server) error {
 		server.tlsListener = true
 		return nil
-	}
-}
-
-func WithTLSPassphrase(certFile string, keyFile string, pass string) OptionSetter {
-	return func(server *Server) error {
-		return server.configureTLSWithPassphrase(certFile, keyFile, pass)
 	}
 }
 
@@ -180,10 +187,11 @@ type Server struct {
 	maxSize      int
 	timeout      time.Duration
 	tlsConfig    *tls.Config
-	tlsListener  bool // Listen for incoming TLS connections only (not recommended as it may reduce compatibility). Ignored if TLS is not configured.
-	tlsRequired  bool // Require TLS for every command except NOOP, EHLO, STARTTLS, or QUIT as per RFC 3207. Ignored if TLS is not configured.
+	tlsListener  bool
+	tlsRequired  bool
 }
 
+// NewServer creates a new server, the options are available using the option pattern
 func NewServer(handler Handler, opts ...OptionSetter) (*Server, error) {
 	host, _ := os.Hostname()
 	s := &Server{
@@ -254,10 +262,10 @@ func (srv *Server) configureTLSWithPassphrase(
 	return nil
 }
 
-// ListenAndServe listens on the TCP network address srv.Addr and then
+// ListenAndServeContext listens on the TCP network address srv.Addr and then
 // calls Serve to handle requests on incoming connections.  If
 // srv.Addr is blank, ":25" is used.
-func (srv *Server) ListenAndServe() error {
+func (srv *Server) ListenAndServeContext(ctx context.Context) error {
 	var ln net.Listener
 	var err error
 
@@ -270,14 +278,21 @@ func (srv *Server) ListenAndServe() error {
 	if err != nil {
 		return err
 	}
-	return srv.Serve(ln)
+	return srv.ServeContext(ctx, ln)
 }
 
-// Serve creates a new SMTP session after a network connection is established.
+// ListenAndServe is the ListenAndServeContext with context background
+func (srv *Server) ListenAndServe() error {
+	return srv.ListenAndServeContext(context.Background())
+}
+
+// Serve creates a new SMTP session after a network connection is established,
+// it uses the the context background
 func (srv *Server) Serve(ln net.Listener) error {
 	return srv.ServeContext(context.Background(), ln)
 }
 
+// ServeContext creates a new SMTP session after a network connection is established.
 func (srv *Server) ServeContext(ctx context.Context, ln net.Listener) error {
 	defer func() {
 		_ = ln.Close()
@@ -303,7 +318,7 @@ func (srv *Server) ServeContext(ctx context.Context, ln net.Listener) error {
 			return err
 		case conn := <-connChan:
 			session := srv.newSession(conn)
-			go session.serve()
+			go session.serve(ctx)
 		case <-ctx.Done():
 			return nil
 		}
@@ -353,7 +368,7 @@ func (s *session) logErr(err error) {
 }
 
 // Function called to handle connection requests.
-func (s *session) serve() {
+func (s *session) serve(ctx context.Context) {
 	defer s.conn.Close()
 	var from string
 	var gotFrom bool
@@ -362,20 +377,38 @@ func (s *session) serve() {
 
 	// Send banner.
 	s.writef("220 %s %s ESMTP Service ready", s.srv.hostname, s.srv.appname)
+	errChan := make(chan error, 1)
+	lineChan := make(chan string, 1)
 
-loop:
-	for {
+	fn := func() {
 		// Attempt to read a line from the socket.
 		// On timeout, send a timeout message and return from serve().
 		// On error, assume the client has gone away i.e. return from serve().
 		line, err := s.readLine()
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				s.writef("421 4.4.2 %s %s ESMTP Service closing transmission channel after timeout exceeded", s.srv.hostname, s.srv.appname)
-			}
-			break
+			errChan <- err
+			return
 		}
-		verb, args := s.parseLine(line)
+		lineChan <- line
+	}
+loop:
+	for {
+		go fn()
+		var verb, args string
+		select {
+		case err := <-errChan:
+			if err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					s.writef("421 4.4.2 %s %s ESMTP Service closing transmission channel after timeout exceeded", s.srv.hostname, s.srv.appname)
+				}
+				return
+			}
+		case <-ctx.Done():
+			return
+		case line := <-lineChan:
+			verb, args = s.parseLine(line)
+		}
+		var err error
 
 		switch verb {
 		case "HELO":

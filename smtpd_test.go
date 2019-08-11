@@ -3,6 +3,7 @@ package smtpd
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/md5"
 	"crypto/tls"
@@ -25,7 +26,7 @@ var cert = makeCertificate()
 func newConn(t *testing.T, server *Server) net.Conn {
 	clientConn, serverConn := net.Pipe()
 	session := server.newSession(serverConn)
-	go session.serve()
+	go session.serve(context.Background())
 
 	banner, err := bufio.NewReader(clientConn).ReadString('\n')
 	if err != nil {
@@ -1470,7 +1471,7 @@ func BenchmarkReceive(b *testing.B) {
 	server := &Server{} // Default server configuration.
 	clientConn, serverConn := net.Pipe()
 	session := server.newSession(serverConn)
-	go session.serve()
+	go session.serve(context.Background())
 
 	reader := bufio.NewReader(clientConn)
 	_, _ = reader.ReadString('\n') // Read greeting message first.

@@ -155,7 +155,7 @@ func TestCmdMAIL(t *testing.T) {
 
 func TestCmdMAILMaxSize(t *testing.T) {
 	maxSize := 10 + time.Now().Minute()
-	conn := newConn(t, &Server{MaxSize: maxSize})
+	conn := newConn(t, &Server{maxSize: maxSize})
 	cmdCode(t, conn, "EHLO host.example.com", "250")
 
 	// MAIL with no size parameter should return 250 Ok
@@ -251,7 +251,7 @@ func TestCmdDATA(t *testing.T) {
 
 func TestCmdDATAWithMaxSize(t *testing.T) {
 	// "Test message.\r\n." is 15 bytes after trailing period is removed.
-	conn := newConn(t, &Server{MaxSize: 15})
+	conn := newConn(t, &Server{maxSize: 15})
 	cmdCode(t, conn, "EHLO host.example.com", "250")
 
 	// Messages below the maximum size should return 250 Ok
@@ -302,7 +302,7 @@ func TestCmdSTARTTLS(t *testing.T) {
 
 func TestCmdSTARTTLSFailure(t *testing.T) {
 	// Deliberately misconfigure TLS to force a handshake failure.
-	server := &Server{TLSConfig: &tls.Config{}}
+	server := &Server{tlsConfig: &tls.Config{}}
 	conn := newConn(t, server)
 	cmdCode(t, conn, "EHLO host.example.com", "250")
 
@@ -391,7 +391,7 @@ TDHSaTMOxVUEzpx84xClf561BTiTgzQy2MULpg3AK0Cv9l0+Yrvz
 
 func TestCmdSTARTTLSSuccess(t *testing.T) {
 	// Configure a valid TLS certificate so the handshake will succeed.
-	server := &Server{TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}}
+	server := &Server{tlsConfig: &tls.Config{Certificates: []tls.Certificate{cert}}}
 	conn := newConn(t, server)
 	cmdCode(t, conn, "EHLO host.example.com", "250")
 
@@ -435,8 +435,8 @@ func TestCmdSTARTTLSRequired(t *testing.T) {
 		{"AUTH", "530", "502"}, // AuthHandler not configured
 	}
 
-	// If TLS is not configured, the TLSRequired setting is ignored, so it must be configured for this test.
-	server := &Server{TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, TLSRequired: true}
+	// If TLS is not configured, the tlsRequired setting is ignored, so it must be configured for this test.
+	server := &Server{tlsConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, tlsRequired: true}
 	conn := newConn(t, server)
 
 	// If TLS is required, but not in use, reject every command except NOOP, EHLO, STARTTLS, or QUIT as per RFC 3207 section 4.
@@ -473,7 +473,7 @@ func TestMakeHeaders(t *testing.T) {
 		"        for <recipient@example.com>; " +
 		fmt.Sprintf("%s\r\n", now)
 
-	srv := &Server{Appname: "smtpd", Hostname: "serverName"}
+	srv := &Server{appname: "smtpd", hostname: "serverName"}
 	s := &session{srv: srv, remoteIP: "clientIP", remoteHost: "clientHost", remoteName: "clientName"}
 	headers := s.makeHeaders([]string{"recipient@example.com"})
 	if string(headers) != valid {
@@ -594,7 +594,7 @@ func TestReadDataWithMaxSize(t *testing.T) {
 	s.br = bufio.NewReader(&buf)
 
 	for _, tt := range tests {
-		s.srv = &Server{MaxSize: tt.maxSize}
+		s.srv = &Server{maxSize: tt.maxSize}
 		buf.Write([]byte(tt.lines))
 		_, err := s.readData()
 		if err != tt.err {
@@ -641,7 +641,7 @@ func parseExtensions(t *testing.T, greeting string) map[string]string {
 	return extensions
 }
 
-// Handler function for validating authentication credentials.
+// handler function for validating authentication credentials.
 // The secret parameter is passed as nil for LOGIN and PLAIN authentication mechanisms.
 func authHandler(remoteAddr net.Addr, mechanism string, username []byte, password []byte, shared []byte) (bool, error) {
 	return string(username) == "valid", nil
@@ -665,7 +665,7 @@ func TestMakeEHLOResponse(t *testing.T) {
 	}
 
 	// If TLS is configured, but not already in use, STARTTLS should appear.
-	s.srv.TLSConfig = &tls.Config{}
+	s.srv.tlsConfig = &tls.Config{}
 	extensions = parseExtensions(t, s.makeEHLOResponse())
 	if _, ok := extensions["STARTTLS"]; !ok {
 		t.Errorf("STARTTLS does not appear in the extension list when TLS is configured")
@@ -691,7 +691,7 @@ func TestMakeEHLOResponse(t *testing.T) {
 	// Any integer will suffice, as long as it's not hardcoded.
 	maxSize := 10 + time.Now().Minute()
 	maxSizeStr := fmt.Sprintf("%d", maxSize)
-	s.srv = &Server{MaxSize: maxSize}
+	s.srv = &Server{maxSize: maxSize}
 	extensions = parseExtensions(t, s.makeEHLOResponse())
 	if _, ok := extensions["SIZE"]; !ok {
 		t.Errorf("SIZE does not appear in the extension list")
@@ -707,7 +707,7 @@ func TestMakeEHLOResponse(t *testing.T) {
 	}
 
 	// With an authentication handler configured, AUTH should be advertised.
-	s.srv = &Server{AuthHandler: authHandler}
+	s.srv = &Server{authHandler: authHandler}
 	extensions = parseExtensions(t, s.makeEHLOResponse())
 	if _, ok := extensions["AUTH"]; !ok {
 		t.Errorf("AUTH does not appear in the extension list when an AuthHandler is specified")
@@ -829,7 +829,7 @@ func TestConfigureTLSWithPassphrase(t *testing.T) {
 		os.Remove(keyFile.Name())
 	}()
 	srv := &Server{}
-	err = srv.ConfigureTLSWithPassphrase(
+	err = srv.configureTLSWithPassphrase(
 		certFile.Name(),
 		keyFile.Name(),
 		passphrase,
@@ -837,7 +837,7 @@ func TestConfigureTLSWithPassphrase(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unexpected error: %s", err)
 	}
-	if srv.TLSConfig == nil {
+	if srv.tlsConfig == nil {
 		t.Errorf("Unexpected empty TLS config.")
 	}
 }
@@ -864,7 +864,7 @@ func TestAuthMechs(t *testing.T) {
 	// Validate that overridden values take precedence over RFC compliance when not using TLS.
 	correct = map[string]bool{"LOGIN": true, "PLAIN": true, "CRAM-MD5": false}
 	s.tls = false
-	s.srv.AuthMechs = map[string]bool{"LOGIN": true, "PLAIN": true, "CRAM-MD5": false}
+	s.srv.authMechs = map[string]bool{"LOGIN": true, "PLAIN": true, "CRAM-MD5": false}
 	mechs = s.authMechs()
 	if !reflect.DeepEqual(mechs, correct) {
 		t.Errorf("authMechs() returned %v, want %v", mechs, correct)
@@ -873,7 +873,7 @@ func TestAuthMechs(t *testing.T) {
 	// Validate that overridden values take precedence over RFC compliance when using TLS.
 	correct = map[string]bool{"LOGIN": false, "PLAIN": false, "CRAM-MD5": true}
 	s.tls = true
-	s.srv.AuthMechs = map[string]bool{"LOGIN": false, "PLAIN": false, "CRAM-MD5": true}
+	s.srv.authMechs = map[string]bool{"LOGIN": false, "PLAIN": false, "CRAM-MD5": true}
 	mechs = s.authMechs()
 	if !reflect.DeepEqual(mechs, correct) {
 		t.Errorf("authMechs() returned %v, want %v", mechs, correct)
@@ -881,7 +881,7 @@ func TestAuthMechs(t *testing.T) {
 
 	// Validate ability to explicitly disallow all mechanisms.
 	correct = map[string]bool{"LOGIN": false, "PLAIN": false, "CRAM-MD5": false}
-	s.srv.AuthMechs = map[string]bool{"LOGIN": false, "PLAIN": false, "CRAM-MD5": false}
+	s.srv.authMechs = map[string]bool{"LOGIN": false, "PLAIN": false, "CRAM-MD5": false}
 	mechs = s.authMechs()
 	if !reflect.DeepEqual(mechs, correct) {
 		t.Errorf("authMechs() returned %v, want %v", mechs, correct)
@@ -889,7 +889,7 @@ func TestAuthMechs(t *testing.T) {
 
 	// Validate ability to explicitly allow all mechanisms.
 	correct = map[string]bool{"LOGIN": true, "PLAIN": true, "CRAM-MD5": true}
-	s.srv.AuthMechs = map[string]bool{"LOGIN": true, "PLAIN": true, "CRAM-MD5": true}
+	s.srv.authMechs = map[string]bool{"LOGIN": true, "PLAIN": true, "CRAM-MD5": true}
 	mechs = s.authMechs()
 	if !reflect.DeepEqual(mechs, correct) {
 		t.Errorf("authMechs() returned %v, want %v", mechs, correct)
@@ -909,7 +909,7 @@ func TestCmdAUTH(t *testing.T) {
 }
 
 func TestCmdAUTHOptional(t *testing.T) {
-	server := &Server{AuthHandler: authHandler}
+	server := &Server{authHandler: authHandler}
 	conn := newConn(t, server)
 	cmdCode(t, conn, "EHLO host.example.com", "250")
 
@@ -950,7 +950,7 @@ func TestCmdAUTHOptional(t *testing.T) {
 }
 
 func TestCmdAUTHRequired(t *testing.T) {
-	server := &Server{AuthHandler: authHandler, AuthRequired: true}
+	server := &Server{authHandler: authHandler, authRequired: true}
 	conn := newConn(t, server)
 
 	tests := []struct {
@@ -999,7 +999,7 @@ func TestCmdAUTHRequired(t *testing.T) {
 }
 
 func TestCmdAUTHLOGIN(t *testing.T) {
-	server := &Server{TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, AuthHandler: authHandler}
+	server := &Server{tlsConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, authHandler: authHandler}
 	conn := newConn(t, server)
 	cmdCode(t, conn, "EHLO host.example.com", "250")
 
@@ -1056,7 +1056,7 @@ func TestCmdAUTHLOGIN(t *testing.T) {
 }
 
 func TestCmdAUTHLOGINFast(t *testing.T) {
-	server := &Server{TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, AuthHandler: authHandler}
+	server := &Server{tlsConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, authHandler: authHandler}
 	conn := newConn(t, server)
 	cmdCode(t, conn, "EHLO host.example.com", "250")
 
@@ -1108,7 +1108,7 @@ func TestCmdAUTHLOGINFast(t *testing.T) {
 }
 
 func TestCmdAUTHPLAIN(t *testing.T) {
-	server := &Server{TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, AuthHandler: authHandler}
+	server := &Server{tlsConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, authHandler: authHandler}
 	conn := newConn(t, server)
 	cmdCode(t, conn, "EHLO host.example.com", "250")
 
@@ -1167,7 +1167,7 @@ func TestCmdAUTHPLAIN(t *testing.T) {
 }
 
 func TestCmdAUTHPLAINEmpty(t *testing.T) {
-	server := &Server{TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, AuthHandler: authHandler}
+	server := &Server{tlsConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, authHandler: authHandler}
 	conn := newConn(t, server)
 	cmdCode(t, conn, "EHLO host.example.com", "250")
 
@@ -1226,7 +1226,7 @@ func TestCmdAUTHPLAINEmpty(t *testing.T) {
 }
 
 func TestCmdAUTHPLAINFast(t *testing.T) {
-	server := &Server{TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, AuthHandler: authHandler}
+	server := &Server{tlsConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, authHandler: authHandler}
 	conn := newConn(t, server)
 	cmdCode(t, conn, "EHLO host.example.com", "250")
 
@@ -1278,7 +1278,7 @@ func TestCmdAUTHPLAINFast(t *testing.T) {
 }
 
 func TestCmdAUTHPLAINFastAndEmpty(t *testing.T) {
-	server := &Server{TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, AuthHandler: authHandler}
+	server := &Server{tlsConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, authHandler: authHandler}
 	conn := newConn(t, server)
 	cmdCode(t, conn, "EHLO host.example.com", "250")
 
@@ -1343,7 +1343,7 @@ func makeCRAMMD5Response(challenge string, username string, secret string) (stri
 }
 
 func TestCmdAUTHCRAMMD5(t *testing.T) {
-	server := &Server{AuthHandler: authHandler}
+	server := &Server{authHandler: authHandler}
 	conn := newConn(t, server)
 	cmdCode(t, conn, "EHLO host.example.com", "250")
 
@@ -1400,7 +1400,7 @@ func TestCmdAUTHCRAMMD5(t *testing.T) {
 }
 
 func TestCmdAUTHCRAMMD5WithTLS(t *testing.T) {
-	server := &Server{TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, AuthHandler: authHandler}
+	server := &Server{tlsConfig: &tls.Config{Certificates: []tls.Certificate{cert}}, authHandler: authHandler}
 	conn := newConn(t, server)
 	cmdCode(t, conn, "EHLO host.example.com", "250")
 

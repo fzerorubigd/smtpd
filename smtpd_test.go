@@ -474,7 +474,7 @@ func TestMakeHeaders(t *testing.T) {
 		"        for <recipient@example.com>; " +
 		fmt.Sprintf("%s\r\n", now)
 
-	srv := &Server{appname: "smtpd", hostname: "serverName"}
+	srv := &Server{appName: "smtpd", hostname: "serverName"}
 	s := &session{srv: srv, remoteIP: "clientIP", remoteHost: "clientHost", remoteName: "clientName"}
 	headers := s.makeHeaders([]string{"recipient@example.com"})
 	if string(headers) != valid {

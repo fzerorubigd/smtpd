@@ -388,7 +388,10 @@ func (s *session) reset() {
 
 // Function called to handle connection requests.
 func (s *session) serve(ctx context.Context) {
-	defer s.conn.Close()
+	// Just a note and reminder for myself, the defer capture the function, putting it here inside de defer
+	// is wrong, unless like this : `defer s.conn.Close()` and *not* like this `defer func () { _ = s.conn.Close() }()`
+	cl := s.conn.Close
+	defer func() { _ = cl() }()
 	for fn := initFn; fn != nil; fn = fn(ctx, s) {
 	}
 }

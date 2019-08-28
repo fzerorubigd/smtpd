@@ -1,16 +1,15 @@
 # smtpd
 
-An SMTP server package written in Go, in the style of the built-in HTTP server. It meets the minimum requirements specified by RFC 2821 & 5321.
+An SMTP server package written in Go.
 
-It is based on [Brad Fitzpatrick's go-smtpd](https://github.com/bradfitz/go-smtpd). The differences can be summarised as:
+This code is based on [mhale/smtpd](https://github.com/mhale/smtpd) which is also based on [Brad Fitzpatrick's go-smtpd](https://github.com/bradfitz/go-smtpd). 
 
-* A simplified message handler
-* Changes made for RFC compliance
-* Testing has been added
-* Code refactoring
-* TLS support
-* RCPT handler
-* Authentication support
+I refactored the code, almost entirely, the main addition was :
+ 
+* Use context package
+* Change the API to use function option pattern
+* An experimental protocol stream handling using the state machine used in go template for handling text lexer. See [this video](https://www.youtube.com/watch?v=HxaD_trXwRE)
+its easier to test each state. 
 
 ## Features
 
@@ -23,17 +22,25 @@ It is based on [Brad Fitzpatrick's go-smtpd](https://github.com/bradfitz/go-smtp
 
 ## Usage
 
-In general: create the server and pass a handler function to it as for the HTTP server. The server function has the following definition:
+In general: create the server and pass a handler function to it as for the HTTP server. the usage is like this:
 
 ```go
-func ListenAndServe(addr string, handler Handler, appname string, hostname string) error
+srv , err := smtpd.NewServer(
+	smtpd.WithAddress(":2525"),
+	smtpd.WithAppName("appname"),
+	smtpd.WithHostname("hostname"),
+	smtpd.WithDebug(debugHandler),
+	smtpd.AllowAuthMechanisms("LOGIN", true),
+) 
+// Handle the err ...
+// Then run the server 
+err = srv.ListenAndServeContext(ctx)
+// Handle the err ...
 ```
 
-For TLS support, add the paths to the certificate and key files as for the HTTP server.
+Error handling is ignored in th example.
 
-```go
-func ListenAndServeTLS(addr string, certFile string, keyFile string, handler Handler, appname string, hostname string) error
-```
+For TLS support, add the paths to the certificate and key files as for the HTTP server using the `WithTLS` and `WithTLSPassphrase` options.
 
 The handler function must have the following definition:
 
@@ -59,21 +66,21 @@ SMTP over TLS works slightly differently to how you might expect if you are used
 
 The TLS support has three server configuration options. The bare minimum requirement to enable TLS is to supply certificate and key files as in the TLS example below.
 
-* TLSConfig
+* `WithTLS` and `WithTLSPassphrase`
 
 This option allows custom TLS configurations such as [requiring strong ciphers](https://cipherli.st/) or using other certificate creation methods. If a certificate file and a key file are supplied to the ConfigureTLS function, the default TLS configuration for Go will be used. The default value for TLSConfig is nil, which disables TLS support.
 
-* TLSRequired
+* `RequireTLS`
 
 This option sets whether TLS is optional or required. If set to true, the only allowed commands are NOOP, EHLO, STARTTLS and QUIT (as specified in RFC 3207) until the connection is upgraded to TLS i.e. until STARTTLS is issued. This option is ignored if TLS is not configured i.e. if TLSConfig is nil. The default is false.
 
-* TLSListener
+* `OnlyTLS`
 
 This option sets whether the listening socket requires an immediate TLS handshake after connecting. It is equivalent to using HTTPS in web servers, or the now defunct SMTPS on port 465. This option is ignored if TLS is not configured i.e. if TLSConfig is nil. The default is false.
 
 There is also a related package configuration option.
 
-* Debug
+* `WithDebug`
 
 This option determines if the data being read from or written to the client will be logged. This may help with debugging when using encrypted connections. The default is false.
 
@@ -81,34 +88,28 @@ This option determines if the data being read from or written to the client will
 
 The authentication support offers three mechanisms (CRAM-MD5, LOGIN and PLAIN) and has three server configuration options. The bare minimum requirement to enable authentication is to supply an authentication handler function as in the authentication example below.
 
-* AuthHandler
+* `WithAuthHandler`
 
 This option provides an authentication handler function which is called to determine the validity of the supplied credentials.
+Also, this option sets whether authentication is optional or required. If set to true, the only allowed commands are AUTH, EHLO, HELO, NOOP, RSET and QUIT (as specified in RFC 4954) until the session is authenticated. This option is ignored if authentication is not configured i.e. if AuthHandler is nil. The default is false.
+If both TLS and authentication are required, the TLS requirements take priority.
 
-* AuthMechs
+* `AllowAuthMechanisms`
 
 This option allows the list of allowed authentication mechanisms to be explicitly set, overriding the default settings.
-
-* AuthRequired
-
-This option sets whether authentication is optional or required. If set to true, the only allowed commands are AUTH, EHLO, HELO, NOOP, RSET and QUIT (as specified in RFC 4954) until the session is authenticated. This option is ignored if authentication is not configured i.e. if AuthHandler is nil. The default is false.
-
-If both TLS and authentication are required, the TLS requirements take priority.
 
 ### Notes
 
 RFC 4954 specifies that the LOGIN and PLAIN mechanisms require TLS to be in use as they send the password in plaintext. By default, smtpd follows this requirement, and will not advertise or allow LOGIN and PLAIN until a TLS connection is established. This behaviour can be overridden during testing by using the AuthMechs option. For example, to enable the PLAIN mechanism regardless of TLS:
 
 ```go
-mechs := map[string]bool{"PLAIN": true}
-srv := &smtpd.Server{AuthMechs: mechs, ...}
+AllowAuthMechanisms("PLAIN", true)
 ```
 
 The LOGIN and PLAIN mechanisms send the password to the server, but CRAM-MD5 does not - it sends a hash of the password, with a salt supplied by the server. In order to authenticate a session using CRAM-MD5, the server must have access to the plaintext password so it can hash it with the same salt and compare it to the hash sent by the client. If passwords are stored in a hashed format (and they should be), they cannot be transformed into plaintext, and therefore CRAM-MD5 cannot be used. To disable the CRAM-MD5 mechanism:
 
 ```go
-mechs := map[string]bool{"CRAM-MD5": false}
-srv := &smtpd.Server{AuthMechs: mechs, ...}
+AllowAuthMechanisms("CRAM-MD5", false)
 ```
 
 The Go SMTP client cancels the authentication exchange by sending an asterisk to the server after a failed authentication attempt. The server will ignore this behaviour.
@@ -126,7 +127,7 @@ import (
     "net"
     "net/mail"
 
-    "github.com/mhale/smtpd"
+    "github.com/fzerorubigd/smtpd"
 )
 
 func mailHandler(origin net.Addr, from string, to []string, data []byte) {
@@ -136,18 +137,30 @@ func mailHandler(origin net.Addr, from string, to []string, data []byte) {
 }
 
 func main() {
-    smtpd.ListenAndServe("127.0.0.1:2525", mailHandler, "MyServerApp", "")
+    srv , err := smtpd.NewServer(
+        mailHandler, 
+        smtpd.WithAddress("127.0.0.1:2525"),
+        smtpd.WithAppName("MyServerApp"),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    if err = srv.ListenAndServe() ; err != nil {
+        panic(err)
+    } 
+
 }
 ```
 
 ## TLS Example
 
-Using the example code above, only the main function would be different to add TLS support.
+Using the example code above, only adding the following option (or the one with passphrase) to the `NewServer` function 
 
 ```go
-func main() {
-    smtpd.ListenAndServeTLS("127.0.0.1:2525", "/path/to/server.crt", "/path/to/server.key", mailHandler, "MyServerApp", "")
-}
+// Only if you want to use TLS :
+smtpd.WithTLS("/path/to/server.crt", "/path/to/server.key")
+
 ```
 
 This allows STARTTLS to be listed as a supported extension and allows clients to upgrade connections to TLS by sending a STARTTLS command.
@@ -159,23 +172,12 @@ As the package level helper functions do not set the TLSRequired or TLSListener 
 With the same ```mailHandler``` as above:
 
 ```go
-func rcptHandler(remoteAddr net.Addr, from string, to string) bool {
-    domain = getDomain(to)
-    return domain == "mail.example.com"
-}
-
-func ListenAndServe(addr string, handler smtpd.Handler, rcpt smtpd.HandlerRcpt) error {
-    srv := &smtpd.Server{
-        Addr:        addr,
-        Handler:     handler,
-        HandlerRcpt: rcpt,
-        Appname:     "MyServerApp",
-        Hostname:    "",
-    }
-    return srv.ListenAndServe()
-}
-
-ListenAndServe("127.0.0.1:2525", mailHandler, rcptHandler)
+// Add this option to NewServer 
+smtpd.WithRcptHandler(
+    func (remoteAddr net.Addr, from string, to string) bool {
+        domain = getDomain(to)
+        return domain == "mail.example.com"
+    })
 ```
 
 ## Authentication Example
@@ -183,26 +185,14 @@ ListenAndServe("127.0.0.1:2525", mailHandler, rcptHandler)
 With the same ```mailHandler``` as above:
 
 ```go
-func authHandler(remoteAddr net.Addr, mechanism string, username []byte, password []byte, shared []byte) (bool, error) {
-    return string(username) == "valid" && string(password) == "password", nil
-}
-
-func ListenAndServe(addr string, handler smtpd.Handler, authHandler smtpd.AuthHandler) error {
-    srv := &smtpd.Server{
-        Addr:        addr,
-        Handler:     handler,
-        Appname:     "MyServerApp",
-        Hostname:    "",
-        AuthHandler: authHandler,
-        AuthRequired: true,
-    }
-    return srv.ListenAndServe()
-}
-
-ListenAndServe("127.0.0.1:2525", mailHandler, authHandler)
+smtpd.WithAuthHandler(
+    func (remoteAddr net.Addr, mechanism string, username []byte, password []byte, shared []byte) (bool, error) {
+        return string(username) == "valid" && string(password) == "password", nil
+    }, true, 
+)
 ```
 
-This allows AUTH to be listed as a supported extension, CRAM-MD5 as a supported mechanism, and allows clients to authenticate by sending an AUTH command.
+This allows AUTH to be listed as a supported extension, `CRAM-MD5` as a supported mechanism, and allows clients to authenticate by sending an AUTH command.
 
 ## Testing
 
@@ -214,4 +204,5 @@ The TLS and authentication support has also been manually tested with Go client 
 
 ## Licensing
 
-Some of the code in this package was copied or adapted from code found in [Brad Fitzpatrick's go-smtpd](https://github.com/bradfitz/go-smtpd). As such, those sections of code are subject to their original copyright and license. The remaining code is in the public domain.
+Some of the code in this package was copied or adapted from code found in [Brad Fitzpatrick's go-smtpd](https://github.com/bradfitz/go-smtpd). As such, those sections of code are subject to their original copyright and license. The remaining code from [mhale/smtpd](https://github.com/mhale/smtpd) 
+is in public domain. the code in this library is MIT (Not sure if I can change the License).

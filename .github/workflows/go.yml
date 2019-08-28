@@ -26,6 +26,6 @@ jobs:
 
     - name: Build
       run: go build -v .
-      
+
     - name: test
-      run: go test ./...
+      run: go test -v -cover ./...

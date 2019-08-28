@@ -46,10 +46,12 @@ func main() {
 		smtpd.WithHostname(*hostName),
 		smtpd.WithDebug(debugHandler),
 		smtpd.AllowAuthMechanisms("LOGIN", true),
-		smtpd.WithAuthHandler(func(remoteAddr net.Addr, mechanism string, username []byte, password []byte, shared []byte) (bool, error) {
-			fmt.Println(remoteAddr.String(), "AUTH: ", mechanism, string(username), string(password), string(shared))
-			return true, nil
-		}, true),
+		smtpd.WithAuthHandler(
+			func(remoteAddr net.Addr, mechanism string, username []byte, password []byte, shared []byte) (bool, error) {
+				fmt.Println(remoteAddr.String(), "AUTH: ", mechanism, string(username), string(password), string(shared))
+				return true, nil
+			},
+			true),
 	}
 
 	srv, err := smtpd.NewServer(handler, opts...)

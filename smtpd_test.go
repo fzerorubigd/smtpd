@@ -12,6 +12,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
+	"net/textproto"
 	"os"
 	"reflect"
 	"regexp"
@@ -508,7 +509,7 @@ func TestReadLine(t *testing.T) {
 	var buf bytes.Buffer
 	s := &session{}
 	s.srv = &Server{}
-	s.br = bufio.NewReader(&buf)
+	s.br = textproto.NewReader(bufio.NewReader(&buf))
 
 	// Ensure readLine() returns an EOF error on an empty buffer.
 	_, err := s.readLine()
@@ -535,29 +536,29 @@ func TestReadData(t *testing.T) {
 		data  string
 	}{
 		// Single line message.
-		{"Test message.\r\n.\r\n", "Test message.\r\n"},
+		{"Test message.\r\n.\r\n", "Test message.\n"},
 
 		// Single line message with leading period removed.
-		{".Test message.\r\n.\r\n", "Test message.\r\n"},
+		{".Test message.\r\n.\r\n", "Test message.\n"},
 
 		// Multiple line message.
-		{"Line 1.\r\nLine 2.\r\nLine 3.\r\n.\r\n", "Line 1.\r\nLine 2.\r\nLine 3.\r\n"},
+		{"Line 1.\r\nLine 2.\r\nLine 3.\r\n.\r\n", "Line 1.\nLine 2.\nLine 3.\n"},
 
 		// Multiple line message with leading period removed.
-		{"Line 1.\r\n.Line 2.\r\nLine 3.\r\n.\r\n", "Line 1.\r\nLine 2.\r\nLine 3.\r\n"},
+		{"Line 1.\r\n.Line 2.\r\nLine 3.\r\n.\r\n", "Line 1.\nLine 2.\nLine 3.\n"},
 
 		// Multiple line message with one leading period removed.
-		{"Line 1.\r\n..Line 2.\r\nLine 3.\r\n.\r\n", "Line 1.\r\n.Line 2.\r\nLine 3.\r\n"},
+		{"Line 1.\r\n..Line 2.\r\nLine 3.\r\n.\r\n", "Line 1.\n.Line 2.\nLine 3.\n"},
 	}
 	var buf bytes.Buffer
 	s := &session{}
 	s.srv = &Server{}
-	s.br = bufio.NewReader(&buf)
+	s.br = textproto.NewReader(bufio.NewReader(&buf))
 
 	// Ensure readData() returns an EOF error on an empty buffer.
 	_, err := s.readData()
-	if err != io.EOF {
-		t.Errorf("readData() on empty buffer returned err: %v, want EOF", err)
+	if err != io.ErrUnexpectedEOF {
+		t.Errorf("readData() on empty buffer returned err: %v, want ErrUnexpectedEOF", err)
 	}
 
 	for _, tt := range tests {
@@ -592,7 +593,7 @@ func TestReadDataWithMaxSize(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	s := &session{}
-	s.br = bufio.NewReader(&buf)
+	s.br = textproto.NewReader(bufio.NewReader(&buf))
 
 	for _, tt := range tests {
 		s.srv = &Server{maxSize: tt.maxSize}

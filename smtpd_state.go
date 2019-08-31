@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"net"
+	"net/textproto"
 	"os"
 	"strconv"
 	"strings"
@@ -342,8 +343,8 @@ func fnTLSConnect(_ context.Context, s *session) stateFn {
 
 	// TLS handshake succeeded, switch to using the TLS connection.
 	s.conn = tlsConn
-	s.br = bufio.NewReader(s.conn)
-	s.bw = bufio.NewWriter(s.conn)
+	s.br = textproto.NewReader(bufio.NewReader(s.conn))
+	s.bw = textproto.NewWriter(bufio.NewWriter(s.conn))
 	s.tls = true
 
 	// RFC 3207 specifies that the server must discard any prior knowledge obtained from the client.

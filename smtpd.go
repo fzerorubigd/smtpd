@@ -9,8 +9,10 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
+	"net/textproto"
 	"os"
 	"regexp"
 	"strings"
@@ -336,8 +338,8 @@ func (srv *Server) ServeContext(ctx context.Context, ln net.Listener) error {
 type session struct {
 	srv           *Server
 	conn          net.Conn
-	br            *bufio.Reader
-	bw            *bufio.Writer
+	br            *textproto.Reader
+	bw            *textproto.Writer
 	remoteIP      string // Remote IP address
 	remoteHost    string // Remote hostname according to reverse DNS lookup
 	remoteName    string // Remote hostname as supplied with EHLO
@@ -354,8 +356,9 @@ func (srv *Server) newSession(conn net.Conn) (s *session) {
 	s = &session{
 		srv:  srv,
 		conn: conn,
-		br:   bufio.NewReader(conn),
-		bw:   bufio.NewWriter(conn),
+		// TODO: limit reader
+		br: textproto.NewReader(bufio.NewReader(conn)),
+		bw: textproto.NewWriter(bufio.NewWriter(conn)),
 	}
 
 	// Get remote end info for the Received header.
@@ -405,20 +408,13 @@ func (s *session) writef(format string, args ...interface{}) error {
 		}
 	}
 
-	line := fmt.Sprintf(format, args...)
-	_, err := fmt.Fprintf(s.bw, line+"\r\n")
-	if err != nil {
-		s.logErr(err)
-		return err
-	}
-	err = s.bw.Flush()
-	if err != nil {
+	if err := s.bw.PrintfLine(format, args...); err != nil {
 		s.logErr(err)
 		return err
 	}
 
 	if s.srv.debug != nil {
-		s.srv.debug(s.conn.RemoteAddr(), "WRITE", line)
+		s.srv.debug(s.conn.RemoteAddr(), "WRITE", fmt.Sprintf(format, args...))
 	}
 
 	return nil
@@ -432,7 +428,7 @@ func (s *session) readLine() (string, error) {
 		}
 	}
 
-	line, err := s.br.ReadString('\n')
+	line, err := s.br.ReadLine()
 	if err != nil {
 		return "", err
 	}
@@ -459,38 +455,25 @@ func (s *session) parseLine(line string) (verb string, args string) {
 
 // Read the message data following a DATA command.
 func (s *session) readData() ([]byte, error) {
-	var data []byte
-	for {
-		if s.srv.timeout > 0 {
-			if err := s.conn.SetReadDeadline(time.Now().Add(s.srv.timeout)); err != nil {
-				return nil, err
-			}
-		}
-
-		line, err := s.br.ReadBytes('\n')
-		if err != nil {
-			return nil, err
-		}
-		// Handle end of data denoted by lone period (\r\n.\r\n)
-		if bytes.Equal(line, []byte(".\r\n")) {
-			break
-		}
-		// Remove leading period (RFC 5321 section 4.5.2)
-		if line[0] == '.' {
-			line = line[1:]
-		}
-
-		// Enforce the maximum message size limit.
-		if s.srv.maxSize > 0 {
-			if len(data)+len(line) > s.srv.maxSize {
-				_, _ = s.br.Discard(s.br.Buffered()) // Discard the buffer remnants.
-				return nil, maxSizeExceeded(s.srv.maxSize)
-			}
-		}
-
-		data = append(data, line...)
+	r := s.br.DotReader()
+	if s.srv.maxSize == 0 {
+		return ioutil.ReadAll(r)
 	}
-	return data, nil
+	// TODO: Pool
+	buf := make([]byte, s.srv.maxSize)
+
+	n, err := r.Read(buf)
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+
+	// Data left after reading the entire buffer
+	if n == len(buf) && err == nil {
+		_, _ = io.Copy(ioutil.Discard, r)
+		return nil, maxSizeExceeded(s.srv.maxSize)
+	}
+
+	return buf[:n], nil
 }
 
 // Create the Received header to comply with RFC 2821 section 3.8.2.
